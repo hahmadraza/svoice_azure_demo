@@ -6,105 +6,157 @@ import os
 from transformers import AutoProcessor, pipeline
 from optimum.onnxruntime import ORTModelForSpeechSeq2Seq
 from glob import glob
-load_model()
+from azure.storage.blob import BlobServiceClient
+import shutil
+from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
+from datetime import datetime, timedelta
+import streamlit as st
+import torch
 
-BASE_PATH = os.path.dirname(os.path.abspath(__file__))
-os.makedirs('input', exist_ok=True)
-os.makedirs('separated', exist_ok=True)
+def input_audio(folder_name, audio_file, original_filename):
+    
+    if os.path.isfile(audio_file):
+# Perform some operations on the file
+        blobConnection = "DefaultEndpointsProtocol=https;AccountName=facebookresear4437532754;AccountKey=Brktu/gs0m+SZhAKN+M03YvMoQNJVjkKdA6JZJe3KRmIYkI2Xh8aPYYmxekFrU/JE4PGwvPxTmAV+AStLsLDgg==;EndpointSuffix=core.windows.net"
+        blob_service_client = BlobServiceClient.from_connection_string(blobConnection)
+        container_client = blob_service_client.get_container_client("azureml")
+        
+        # Generate a unique blob name (e.g., using a timestamp)
+        # original_filename = 'test3.wav'
+        blob_name = f"{folder_name}/{original_filename}"
 
-print("Loading ASR model...")
-processor = AutoProcessor.from_pretrained("openai/whisper-small")
-if not os.path.exists("whisper_checkpoint"):
-    model = ORTModelForSpeechSeq2Seq.from_pretrained("openai/whisper-small", from_transformers=True)
-    speech_recognition_pipeline = pipeline(
-    "automatic-speech-recognition",
-        model=model,
-        feature_extractor=processor.feature_extractor,
-        tokenizer=processor.tokenizer,
-    )
-    os.makedirs('whisper_checkpoint', exist_ok=True)
-    model.save_pretrained("whisper_checkpoint")
-else:
-    model = ORTModelForSpeechSeq2Seq.from_pretrained("whisper_checkpoint", from_transformers=False)
-    speech_recognition_pipeline = pipeline(
-    "automatic-speech-recognition",
-        model=model,
-        feature_extractor=processor.feature_extractor,
-        tokenizer=processor.tokenizer,
-    )
-print("Whisper ASR model loaded.")
+        # Upload the audio file to Azure Blob Storage
+        blob_client = container_client.get_blob_client(blob_name)
+        with open(audio_file, "rb") as data:
+            blob_client.upload_blob(data, overwrite=True)
+        
+        expiration_time = datetime.utcnow() + timedelta(days=365)
 
-def separator(audio, rec_audio, example):
+        # Generate a SAS token for the blob with read permission and the calculated expiration time
+        sas_token = generate_blob_sas(
+        blob_client.account_name,
+        blob_client.container_name,
+        blob_client.blob_name,
+        account_key=blob_service_client.credential.account_key,
+        permission=BlobSasPermissions(read=True),
+        expiry=expiration_time
+        )
+
+        sas_url = f"{blob_client.url}?{sas_token}"
+
+    return sas_url
+
+def separator(audio_file):
+    inputs = {}
     outputs= {}
-    for f in glob('input/*'):
-        os.remove(f)
-    for f in glob('separated/*'):
-        os.remove(f)
-    if audio:
-        write('input/original.wav', audio[0], audio[1])
-    elif rec_audio:
-        write('input/original.wav', rec_audio[0], rec_audio[1])
-    else:
-        os.system(f'cp {example} input/original.wav')
+
+    filename = audio_file.split('/')[-1]
+    folder_name = filename.split('.')[0]
+    output_path = os.path.join('./input/', filename)
+    # shutil.copy(audio_file, output_path)
+
+    input_url = input_audio(folder_name, output_path, filename)
+    inputs[filename] = input_url
     separate_demo(mix_dir="./input")
+
     separated_files = glob(os.path.join('separated', "*.wav"))
-    separated_files = [f for f in separated_files if "original.wav" not in f]
-    outputs['transcripts'] = []
-    for file in sorted(separated_files):
-        separated_audio = sio.wavfile.read(file)
-        outputs['transcripts'].append(speech_recognition_pipeline(separated_audio[1])['text'])
-    return sorted(separated_files) + outputs['transcripts']
+    separated_files = [f for f in separated_files if filename not in f]
+
+    for file in separated_files:
+        filename = file.split('/')[-1]
+        output_url = input_audio(folder_name, file, filename)
+
+        outputs[filename] = output_url
+        
+    return inputs, outputs
+    # for file in sorted(separated_files):
+    #     separated_audio = sio.wavfile.read(file)
+    #     outputs['transcripts'].append(speech_recognition_pipeline(separated_audio[1])['text'])
+
+    # return sorted(separated_files) + outputs['transcripts']
     
 def set_example_audio(example: list) -> dict:
     return gr.Audio.update(value=example[0])
 
-demo = gr.Blocks()
-with demo:
-    gr.Markdown('''
-    <center>
-        <h1>Multiple Voice Separation with Transcription DEMO</h1>
-        <div style="display:flex;align-items:center;justify-content:center;"><iframe src="https://streamable.com/e/0x8osl?autoplay=1&nocontrols=1" frameborder="0" allow="autoplay"></iframe></div>
-        <p>
-            This is a demo for the multiple voice separation algorithm. The algorithm is trained on the LibriMix7 dataset and can be used to separate multiple voices from a single audio file.
-        </p>
-    </center>
-    ''')
-    
-    with gr.Row():
-        input_audio = gr.Audio(label="Input audio", type="numpy")
-        rec_audio = gr.Audio(label="Record Using Microphone", type="numpy", source="microphone")
+def upload_file():
 
-    with gr.Row():
-        output_audio1 = gr.Audio(label='Speaker 1', interactive=False)
-        output_text1 = gr.Text(label='Speaker 1', interactive=False)
-        output_audio2 = gr.Audio(label='Speaker 2', interactive=False)
-        output_text2 = gr.Text(label='Speaker 2', interactive=False)
+    uploaded_file = st.file_uploader("Choose a file to upload")
+    if uploaded_file is not None:
 
-    with gr.Row():
-        output_audio3 = gr.Audio(label='Speaker 3', interactive=False)
-        output_text3 = gr.Text(label='Speaker 3', interactive=False)
-        output_audio4 = gr.Audio(label='Speaker 4', interactive=False)
-        output_text4 = gr.Text(label='Speaker 4', interactive=False)
+        file_name = uploaded_file.name
+        file_ext = os.path.splitext(file_name)[1]
+        unique_name = str(file_name) + file_ext
+        file_path = os.path.join(UPLOAD_FOLDER, file_name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
 
-    with gr.Row():
-        output_audio5 = gr.Audio(label='Speaker 5', interactive=False)
-        output_text5 = gr.Text(label='Speaker 5', interactive=False)
-        output_audio6 = gr.Audio(label='Speaker 6', interactive=False)
-        output_text6 = gr.Text(label='Speaker 6', interactive=False)
+        return file_path
+    else:
+        return None
 
-    with gr.Row():
-        output_audio7 = gr.Audio(label='Speaker 7', interactive=False)
-        output_text7 = gr.Text(label='Speaker 7', interactive=False)
+torch.cuda.empty_cache()
+load_model()
+BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+os.makedirs('input', exist_ok=True)
+os.makedirs('separated', exist_ok=True)
 
-    outputs_audio = [output_audio1, output_audio2, output_audio3, output_audio4, output_audio5, output_audio6, output_audio7]
-    outputs_text = [output_text1, output_text2, output_text3, output_text4, output_text5, output_text6, output_text7]
-    button = gr.Button("Separate")
-    examples = [
-        "samples/mixture1.wav",
-        "samples/mixture2.wav",
-        "samples/mixture3.wav"
-    ]
-    example_selector = gr.inputs.Dropdown(examples, label="Example Audio", default="samples/mixture1.wav")
-    button.click(separator, inputs=[input_audio, rec_audio, example_selector], outputs=outputs_audio + outputs_text)
+# print("Loading ASR model...")
+# processor = AutoProcessor.from_pretrained("openai/whisper-small")
+# if not os.path.exists("whisper_checkpoint"):
+#     model = ORTModelForSpeechSeq2Seq.from_pretrained("openai/whisper-small", from_transformers=True)#.to('cuda')
+#     speech_recognition_pipeline = pipeline(
+#     "automatic-speech-recognition",
+#         model=model,
+#         feature_extractor=processor.feature_extractor,
+#         tokenizer=processor.tokenizer,
+#     )
+#     os.makedirs('whisper_checkpoint', exist_ok=True)
+#     model.save_pretrained("whisper_checkpoint")
+# else:
+#     model = ORTModelForSpeechSeq2Seq.from_pretrained("whisper_checkpoint", from_transformers=False)#.to('cuda')
+#     speech_recognition_pipeline = pipeline(
+#     "automatic-speech-recognition",
+#         model=model,
+#         feature_extractor=processor.feature_extractor,
+#         tokenizer=processor.tokenizer,
+#     )
+# print("Whisper ASR model loaded.")
 
-demo.launch()
+# def separator(audio, rec_audio, example):
+
+
+st.title("Svoice")
+UPLOAD_FOLDER = "/mnt/facebook_research/svoice_demo/input"
+
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+for f in glob('input/*'):
+    os.remove(f)
+for f in glob('separated/*'):
+    os.remove(f)
+
+file_path = upload_file()
+print(file_path)
+if file_path is not None:
+    st.success(f"File uploaded successfully")
+
+    inputs, outputs = separator(str(file_path))
+    st.header("Input")
+    keys= inputs.keys()
+    for input_filename in keys:
+        input_url = inputs[input_filename]
+        st.markdown(f"[{input_filename}]({input_url})")
+
+    st.header("Output")
+
+    keys= outputs.keys()
+    keys = sorted(keys)
+    for output_filename in keys:
+        output_url = outputs[output_filename]
+        st.markdown(f"[{output_filename}]({output_url})")
+        
+else:
+    st.info("No file uploaded")
+
+torch.cuda.empty_cache()
