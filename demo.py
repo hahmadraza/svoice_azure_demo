@@ -17,9 +17,9 @@ def input_audio(folder_name, audio_file, original_filename):
     
     if os.path.isfile(audio_file):
 # Perform some operations on the file
-        blobConnection = "DefaultEndpointsProtocol=https;AccountName=facebookresear4437532754;AccountKey=Brktu/gs0m+SZhAKN+M03YvMoQNJVjkKdA6JZJe3KRmIYkI2Xh8aPYYmxekFrU/JE4PGwvPxTmAV+AStLsLDgg==;EndpointSuffix=core.windows.net"
+        blobConnection = "DefaultEndpointsProtocol=https;AccountName=adthosml;AccountKey=LI6PV+BO8B2pjMwPhFJ5r8DOhhjpUV69pcjdshAFPWOPw59DvYdmHWARAY7OUFMtw8TDgaS0OFod+AStoNX+Ug==;EndpointSuffix=core.windows.net"
         blob_service_client = BlobServiceClient.from_connection_string(blobConnection)
-        container_client = blob_service_client.get_container_client("azureml")
+        container_client = blob_service_client.get_container_client("adthosmlcont")
         
         # Generate a unique blob name (e.g., using a timestamp)
         # original_filename = 'test3.wav'
@@ -126,7 +126,7 @@ os.makedirs('separated', exist_ok=True)
 
 
 st.title("Svoice")
-UPLOAD_FOLDER = "/mnt/facebook_research/svoice_demo/input"
+UPLOAD_FOLDER = "/mnt2/svoice_azure_demo/input"
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)

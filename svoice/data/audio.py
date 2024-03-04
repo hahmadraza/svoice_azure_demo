@@ -32,8 +32,8 @@ def find_audio_files(path, exts=[".wav"], progress=True):
     if progress:
         audio_files = tqdm.tqdm(audio_files,  ncols=80)
     for file in audio_files:
-        siginfo, _ = torchaudio.info(file)
-        length = siginfo.length // siginfo.channels
+        siginfo = torchaudio.info(file)
+        length = siginfo.num_frames // siginfo.num_channels
         meta.append((file, length))
     meta.sort()
     return meta
